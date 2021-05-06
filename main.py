@@ -1,4 +1,7 @@
+import os
+
 from flask import Flask, request, jsonify
+from google.cloud import storage
 
 app = Flask(__name__)
 
