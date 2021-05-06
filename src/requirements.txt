@@ -1,3 +1,5 @@
 Flask==1.1.2
 google-cloud-storage
+google-cloud-dlp
+google-cloud-pubsub
 gunicorn==20.0.4
