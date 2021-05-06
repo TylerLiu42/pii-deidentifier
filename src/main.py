@@ -111,6 +111,60 @@ def create_dlp_job(data, done):
   except Exception as e:
     print(e)
 
+def resolve_DLP(data, context):
+  """This function listens to the pub/sub notification from function above.
+
+    As soon as it gets pub/sub notification, it picks up results from the
+    DLP job and moves the file to sensitive bucket or nonsensitive bucket
+    accordingly.
+    Args:
+        data: The Cloud Pub/Sub event
+
+    Returns:
+        None. Debug information is printed to the log.
+    """
+  # Get the targeted DLP job name that is created by the create_DLP_job function
+  job_name = data['attributes']['DlpJobName']
+  print('Received pub/sub notification from DLP job: {}'.format(job_name))
+
+  # Get the DLP job details by the job_name
+  job = dlp.get_dlp_job(request = {'name': job_name})
+  print('Job Name:{name}\nStatus:{status}'.format(
+      name=job.name, status=job.state))
+
+  # Fetching Filename in Cloud Storage from the original dlpJob config.
+  # See defintion of "JSON Output' in Limiting Cloud Storage Scans':
+  # https://cloud.google.com/dlp/docs/inspecting-storage
+
+  file_path = (
+      job.inspect_details.requested_options.job_config.storage_config
+      .cloud_storage_options.file_set.url)
+  file_name = os.path.basename(file_path)
+
+  info_type_stats = job.inspect_details.result.info_type_stats
+  source_bucket = storage_client.get_bucket(STAGING_BUCKET)
+  source_blob = source_bucket.blob(file_name)
+  if (len(info_type_stats) > 0):
+    # Found at least one sensitive data
+    for stat in info_type_stats:
+      print('Found {stat_cnt} instances of {stat_type_name}.'.format(
+          stat_cnt=stat.count, stat_type_name=stat.info_type.name))
+    print('Moving item to sensitive bucket')
+    destination_bucket = storage_client.get_bucket(SENSITIVE_BUCKET)
+    source_bucket.copy_blob(source_blob, destination_bucket,
+                            file_name)  # copy the item to the sensitive bucket
+    source_blob.delete()  # delete item from the quarantine bucket
+
+  else:
+    # No sensitive data found
+    print('Moving item to non-sensitive bucket')
+    destination_bucket = storage_client.get_bucket(NONSENSITIVE_BUCKET)
+    source_bucket.copy_blob(
+        source_blob, destination_bucket,
+        file_name)  # copy the item to the non-sensitive bucket
+    source_blob.delete()  # delete item from the quarantine bucket
+  print('{} Finished'.format(file_name))
+
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8080, debug=True)
